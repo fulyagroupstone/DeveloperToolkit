@@ -1,0 +1,18 @@
+#!/bin/bash
+
+#Clean
+rm -f bin/*
+rm -f lib/*
+rm -f includes/*
+
+#liblog
+make -C liblog
+cp liblog/liblog.a lib/liblog.a
+cp liblog/headers/liblog.hpp includes/liblog.hpp
+
+#project
+make -C project
+cp project/project bin/project
+
+#test
+./.scripts/test.sh
