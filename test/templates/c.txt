@@ -1,0 +1,65 @@
+#Name: c
+
+#!DIR: src
+#!DIR: headers
+
+#!FILE: src/main.c
+#include <stdio.h>
+
+int main(int argc, char** argv){
+    printf("Hello World!\n");
+    return 0;
+}
+#!END
+
+#!FILE: makefile
+name := #!NAME!#
+
+bin := $(patsubst src/%,bin/%.o,$(wildcard src/*.c))
+
+.PHONY: all
+all: clean bin $(name)
+
+clean:
+    @echo Clean $(name)
+    @rm -f bin/*
+    @rm -f $(name)
+
+bin:
+    @mkdir $@
+
+bin/%.o:src/%
+    @echo Compiling $^
+    @gcc -c -o $@ $^ -Wall
+
+$(name): $(bin)
+    @echo Linking $(name)
+    @gcc -o $@ $^ -Wall
+
+test: $(name)
+    @echo Test $(name)
+    ./$(name)
+#!END
+
+#!FILE: bash
+name=#!NAME!#
+
+#Clean:
+echo Cleaning $name
+rm -fr bin/*
+rm -f $name*
+
+#Create bin:
+mkdir bin 2>/dev/null
+
+#Compile sources
+for src in ./src/*
+do
+    echo Compiling $src
+    gcc -c -o bin/$( echo $src | cut -d '/' -f 2).o $src
+done
+
+#Link:
+echo Linking $name
+gcc -o $name bin/*.o
+#!END
