@@ -1,0 +1,89 @@
+#Name: c_cpp
+
+#!DIR: src
+#!DIR: headers
+
+#!FILE: src/main.cpp
+#include <iostream>
+
+int main(int argc, char** argv){
+    std::cout << "Hello World!" << std::endl;
+    return 0;
+}
+#!END
+
+#!FILE: makefile
+name := #!NAME!#
+
+includes := #!INCLUDES!# -I headers
+
+cflags := #!C_FLAGS!# $(includes)
+cppflags := #!CXX_FLAGS!# $(includes)
+linkerflags := #!LD_FLAGS!#
+
+bin := $(patsubst src/%,bin/%.o,$(wildcard src/*.c*))
+
+.PHONY: all
+all: clean bin $(name)
+
+clean:
+    @echo Clean $(name)
+    @rm -f bin/*
+    @rm -f $(name)
+
+bin:
+    @mkdir $@
+
+bin/%.c.o:src/%.c
+    @echo Compiling $^
+    @gcc -c -o $@ $^ $(cflags)
+
+bin/%.cpp.o:src/%.cpp
+    @echo Compiling $^
+    @g++ -c -o $@ $^ $(cppflags)
+
+$(name): $(bin)
+    @echo Linking $(name)
+    @g++ -o $@ $^ $(linkerflags)
+
+test: $(name)
+    @echo Test $(name)
+    ./$(name)
+#!END
+
+#!FILE: bash
+name='#!NAME!#'
+
+includes='-I headers #!INCLUDES!#'
+
+cflags=('#!C_FLAGS!#' $includes)
+cppflags=('#!CXX_FLAGS!#' $includes)
+linkerflags='#!LD_FLAGS!#'
+
+#Clean:
+echo Cleaning $name
+rm -fr bin/*
+rm -f $name*
+
+#Create bin:
+mkdir bin 2>/dev/null
+
+#Compile sources
+for src in ./src/*
+do
+	echo Compiling $src
+	if [[ $src == *.c ]]
+	then
+		gcc -c -o bin/$( echo $src | cut -d '/' -f 2).o $src $cflags
+    elif [[ $src == *.cpp ]]
+    then
+		g++ -c -o bin/$( echo $src | cut -d '/' -f 2).o $src $cppflags
+	else
+        echo Error: No rule to compile $src
+	fi
+done
+
+#Link:
+echo Linking $name
+g++ -o $name bin/*.o $linkerflags
+#!END
