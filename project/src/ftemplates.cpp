@@ -10,12 +10,13 @@ namespace fs = std::filesystem;
 #define CREATE_DIR(name) if(!fs::create_directory(name)) dtk::log::error("Failed to create directory.", 111); //EACCES
 #define CREATE_FILE(name) { std::ofstream file(name); if(!file.good()) dtk::log::error("Failed to create file.", 111); /*EACCES*/ file.close(); }
 #define CREATE_SCRIPT(name) { std::ofstream file(name); if(!file.good()) dtk::log::error("Failed to create script file.", 111); /*EACCES*/ file << "#!/bin/bash" << std::endl; file.close(); }
-#define FILE_OK(var) if(!var.good()) dtk::log::error("Failed to create file.", 111); //EACCES
+#define FILE_OK(var) if(!var.good()) dtk::log::error("Failed to open file.", 111); //EACCES
 
 namespace ftemplates{
     void create_project(const std::string& name, project::type t, project::build b){
-        bool fast = t == project::PROJECT_TYPE_EXE || t == project::PROJECT_TYPE_LIB;
+        bool fast = t == project::PROJECT_TYPE_SOLUTION;
 
+        //Create project directories
         CREATE_DIR(name);
         CREATE_DIR(name + "/.project");
         CREATE_DIR(name + "/.scripts");
@@ -26,6 +27,7 @@ namespace ftemplates{
             CREATE_DIR(name + "/bin");
         }
 
+        //Create .project/project file
         std::ofstream project(name + "/.project/project");
         FILE_OK(project)
         
@@ -35,298 +37,185 @@ namespace ftemplates{
         
         project.close();
 
-        CREATE_FILE(name + "/.project/solutions");
+        //Create .project/templates file (with no data)
+        CREATE_FILE(name + "/.project/templates");
 
+        //Create scripts (and .project/solutions file in non-fast case)
         if(!fast){
+            CREATE_FILE(name + "/.project/solutions");
+
             CREATE_SCRIPT(name + "/.scripts/clean.sh");
             CREATE_SCRIPT(name + "/.scripts/make.sh");
-        }
-
-        if(t == project::PROJECT_TYPE_LIB){
+            CREATE_SCRIPT(name + "/.scripts/test.sh");
+        } else{
             std::ofstream script_test(name + "/.scripts/test.sh");
             FILE_OK(script_test);
 
             script_test << "#!/bin/bash" << std::endl;
             script_test << std::endl;
-            script_test << "make test/test" << std::endl;
+
+            switch(b){
+                case project::PROJECT_BUILD_MAKE:
+                    script_test << "make test" << std::endl;
+                    script_test << std::endl;
+                    break;
+                case project::PROJECT_BUILD_BASH:
+                    script_test << "./" << name << std::endl;
+                    break;
+            }
 
             script_test.close();
-        } else{
-            CREATE_SCRIPT(name + "/.scripts/test.sh");
         }
 
+        //Create run script
         update_run_script(name + "/run", b, fast);
     }
 
-    void update_run_script(const std::string& p, project::build b, bool fast, bool log){
+    void update_run_script(const std::string& p, project::build b, bool fast, unsigned int enabled){
+        bool log = enabled & project::PROJECT_ENABLE_LOG;
+        bool tests = enabled & project::PROJECT_ENABLE_TESTS;
+
+        //Open run script
         std::ofstream run(p);// name + "/run"
         FILE_OK(run);
 
+        //Get make command
+        std::string make_cmd = "./.scripts/make.sh";
+        if(fast && b != project::PROJECT_BUILD_BASH)
+            make_cmd = "make";
+        
+        //Begin as bash script
         run << "#!/bin/bash" << std::endl;
         run << std::endl;
 
-        if(log){
+        if(log){ //log case
             run << "#Get the log file name" << std::endl;
-            run << "log=$(date +'log/log%d.%m.%Y.txt')" << std::endl;
+            run << "log=$(date +'log/log%Y.%j.txt')" << std::endl;
             run << "mkdir log 2>/dev/null" << std::endl;
             run << std::endl;
-        }
-
-        if(!fast){
-            run << "#Clean" << std::endl;
-            if(log)
-                run << "echo \"#Clean:\" >> $log" << std::endl;
-            run << "./.scripts/clean.sh" << (log?" >> $log":"") << std::endl;
-            if(log)
-                run << "echo \"\" >> $log" << std::endl;
-            run << std::endl;
-        }
-
-        run << "#Make" << std::endl;
-        if(log)
-            run << "echo \"#Make:\" >> $log" << std::endl;
-
-        if(fast && b != project::PROJECT_BUILD_BASH)
-            run << "make" << (log?" >> $log":"") << std::endl;
-        else
-            run << "./.scripts/make.sh" << (log?" >> $log":"") << std::endl;
-        
-        if(log)
+            run << "echo $(date +'#Date: %F %T:%N') >> $log" << std::endl;
             run << "echo \"\" >> $log" << std::endl;
-        
-        run << std::endl;
-        run << "#Test" << std::endl;
-        if(log)
-            run << "echo \"#Test:\" >> $log" << std::endl;
-        run << "./.scripts/test.sh" << (log?" >> $log":"") << std::endl;
+            run << std::endl;
 
-        run << std::endl;
+            if(!fast){
+                run << "#Clean" << std::endl;
+                run << "echo \"#Clean:\" >> $log" << std::endl;
+                run << "./.scripts/clean.sh >> $log" << std::endl;
+                run << "echo \"\" >> $log" << std::endl;
+                run << std::endl;
+            }
 
+            run << "#Make" << std::endl;
+            run << "echo \"#Make:\" >> $log" << std::endl;
+            run << make_cmd << " >> $log" << std::endl;
+            run << "echo \"\" >> $log" << std::endl;
+            run << std::endl;
+
+            if(tests){
+                run << "#Test" << std::endl;
+                run << "echo \"#Test:\" >> $log" << std::endl;
+                run << "./.scripts/test.sh >> $log" << std::endl;
+                run << "echo \"\" >> $log" << std::endl;
+            }
+        } else{ //normal case
+            if(!fast){
+                run << "#Clean" << std::endl;
+                run << "./.scripts/clean.sh" << std::endl;
+                run << std::endl;
+            }
+
+            run << "#Make" << std::endl;
+            run << make_cmd << std::endl;
+            run << std::endl;
+
+            if(tests){
+                run << "#Test" << std::endl;
+                run << "./.scripts/test.sh" << std::endl;
+            }
+        }
+
+        //Close the file
         run.close();
     }
 
-    void create_src_file(const std::string& name, project::type t){
-        CREATE_DIR(name + "/src");
-        CREATE_DIR(name + "/headers");
-
-        std::string file_path = name + "/src/";
-        switch(t){
-            case project::PROJECT_MODULE_TYPE_EXE:
-            case project::PROJECT_TYPE_EXE:
-                file_path += "main";
-                break;
-            case project::PROJECT_MODULE_TYPE_LIB:
-            case project::PROJECT_TYPE_LIB:
-                file_path += name;
-                break;
-            default:
-                file_path += "unnamed";
-                break;
-        }
-        file_path += ".cpp";
-
-        std::ofstream file(file_path);
-        FILE_OK(file);
-
-        if(t == project::PROJECT_MODULE_TYPE_LIB || t == project::PROJECT_TYPE_LIB){
-            file << "#include \"../headers/" << name << ".hpp\"" << std::endl;
-            file << std::endl;
-        }
-
-        file << "#include <iostream>" << std::endl;
-        file << std::endl;
-
-        switch(t){
-            case project::PROJECT_MODULE_TYPE_EXE:
-            case project::PROJECT_TYPE_EXE:
-                file << "int main(int argc, char** argv){" << std::endl;
-                break;
-            case project::PROJECT_MODULE_TYPE_LIB:
-            case project::PROJECT_TYPE_LIB:
-                file << "extern \"C\"{" << std::endl;
-                file << "\tvoid hello(){" << std::endl << "\t";
-                break;
-        }
+    void update_templates_file(const std::string& p, const std::vector<fdata::ProjectTemplate>& templates){
+        //Get already added templates
+        auto added = fdata::load_project_templates(p);
         
-        file << "\tstd::cout << \"Hello World\" << std::endl;" << std::endl << "\t";
+        //Strore seen names
+        std::vector<std::string> names;
 
-        switch(t){
-            case project::PROJECT_MODULE_TYPE_EXE:
-            case project::PROJECT_TYPE_EXE:
-                file << "return 0;" << std::endl;
-                break;
-            case project::PROJECT_MODULE_TYPE_LIB:
-            case project::PROJECT_TYPE_LIB:
-                file << "\t}" << std::endl;
-                break;
-        }
-        
-        file << "}";
+        //Open temlates file
+        std::ofstream templates_file(p);
+        FILE_OK(templates_file);
 
-        file.close();
+        //Add already known templates and store its names (validate them)
+        for(auto& tmpl: added){
+            bool found = false;
 
-        if(t == project::PROJECT_MODULE_TYPE_LIB || t == project::PROJECT_TYPE_LIB){
-            std::ofstream header(name + "/headers/" + name + ".hpp");
-            FILE_OK(header);
+            for(auto& name: names){
+                if(name == tmpl.name){
+                    found = true;
+                    break;
+                }
+            }
 
-            header << "#pragma once" << std::endl;
-            header << std::endl;
-            header << "extern \"C\"{" << std::endl;
-            header << "\tvoid hello();" << std::endl;
-            header << "}";
+            if(!found){
+                names.push_back(tmpl.name);
 
-            header.close();
+                templates_file << tmpl.to_string();
+                templates_file << "#!END" << std::endl;
+                templates_file << std::endl;
+            }
         }
 
-        if(t == project::PROJECT_TYPE_LIB){
-            CREATE_DIR(name + "/test");
+        //Do the same for new templates
+        for(auto& tmpl: templates){
+            bool found = false;
 
-            std::ofstream test(name + "/test/test.cpp");
-            FILE_OK(test);
+            for(auto& name: names){
+                if(name == tmpl.name){
+                    found = true;
+                    break;
+                }
+            }
 
-            test << "#include <iostream>" << std::endl;
-            test << std::endl;
-            test << "#include <" << name << ".hpp>" << std::endl;
-            test << std::endl;
-            test << "int main(){" << std::endl;
-            test << "\thello();" << std::endl;
-            test << "\treturn 0;" << std::endl;
-            test << "}" << std::endl;
+            if(!found){
+                names.push_back(tmpl.name);
 
-            test.close();
+                templates_file << "#Begin" << std::endl;
+                templates_file << tmpl.to_string();
+                templates_file << "#End" << std::endl;
+                templates_file << std::endl;
+            }
         }
+
+        //Close the file
+        templates_file.close();
     }
 
-    void create_makefile(const std::string& name, project::type t){
-        bool fast = t == project::PROJECT_TYPE_EXE || t == project::PROJECT_TYPE_LIB;
-
-        std::ofstream makefile(name + "/makefile");
-        FILE_OK(makefile);
-
-        makefile << "name := " << name << std::endl;
-        makefile << "flags := -std=c++2b " << (t == project::PROJECT_MODULE_TYPE_LIB || t == project::PROJECT_TYPE_LIB?"-fPIC":"") << std::endl;
-        makefile << std::endl;
-        makefile << "includes := headers " << (fast?"":"../include") << std::endl;
-
-        if(t != project::PROJECT_MODULE_TYPE_LIB && t != project::PROJECT_TYPE_LIB) 
-            makefile << "libs := " << (fast?"":"-L ../lib") << std::endl;
-            
-        makefile << std::endl;
-        makefile << "bin := $(patsubst src/%,bin/%.o,$(wildcard src/*))" << std::endl;
-        makefile << std::endl;
-        makefile << ".PHONY: all" << std::endl;
-
-        makefile << "all: clean bin ";
-        switch(t){
-            case project::PROJECT_MODULE_TYPE_EXE:
-            case project::PROJECT_TYPE_EXE:
-                makefile << "$(name)";
-                break;
-            case project::PROJECT_MODULE_TYPE_LIB:
-            case project::PROJECT_TYPE_LIB:
-                makefile << "$(name).a $(name).so";
-        }
-        makefile << std::endl;
-
-        makefile << std::endl;
-        makefile << "clean:" << std::endl;
-        makefile << "\t@echo Cleaning $(name)" << std::endl;
-        makefile << "\t@rm -fr bin/*" << std::endl;
-        makefile << "\t@rm -f $(name)*" << std::endl;
-        makefile << std::endl;
-        makefile << "bin:" << std::endl;
-        makefile << "\t@mkdir $@" << std::endl;
-        makefile << std::endl;
-        makefile << "$(bin):bin/%.o:src/%" << std::endl;
-        makefile << "\t@echo Compiling $^" << std::endl;
-        makefile << "\t@g++ -c -o $@ $^ $(foreach x,$(includes), -I $(x)) $(flags)" << std::endl;
-        makefile << std::endl;
-
-        switch(t){
-            case project::PROJECT_MODULE_TYPE_EXE:
-            case project::PROJECT_TYPE_EXE:
-                makefile << "$(name): $(bin)" << std::endl;
-                makefile << "\t@echo Linking $@" << std::endl;
-                makefile << "\t@g++ -o $@ $^ $(libs) $(flags)" << std::endl;
-                break;
-            case project::PROJECT_MODULE_TYPE_LIB:
-            case project::PROJECT_TYPE_LIB:
-                makefile << "$(name).a: $(bin)" << std::endl;
-                makefile << "\t@echo Linking $@" << std::endl;
-                makefile << "\t@ar cvr $@ $^" << std::endl;
-                makefile << std::endl;
-                makefile << "$(name).so: $(bin)" << std::endl;
-                makefile << "\t@echo Linking $@" << std::endl;
-                makefile << "\t@g++ -shared -o $@ $^ $(flags)" << std::endl;
-                break;
+    void build_template(const std::string& name, const fdata::ProjectSrc& t){
+        //Create directories
+        for(auto& dir: t.directories){
+            CREATE_DIR(dir);
         }
 
-        if(t == project::PROJECT_TYPE_LIB){
-            makefile << std::endl;
-            makefile << "test/test:test/test.cpp" << std::endl;
-            makefile << "\t@echo Test of $(name)" << std::endl;
-            makefile << "\t@g++ -o $@ $^ $(foreach x,$(includes), -I $(x)) $(flags) $(name).a" << std::endl;
+        //Create files
+        for(auto& file: t.src){
+            std::ofstream f(file.first);
+            FILE_OK(f);
+
+            f << file.second;
+
+            f.close();
         }
 
-        makefile.close();
-    }
+        //Create build file
+        std::ofstream build(t.build.first);
+        FILE_OK(build);
 
+        build << t.build.second;
 
-    void create_bash(const std::string& name, project::type t){
-        bool fast = t == project::PROJECT_TYPE_EXE || t == project::PROJECT_TYPE_LIB;
-
-        std::ofstream bash(name + "/.scripts/make.sh");
-        FILE_OK(bash);
-
-        bash << "name='" << name << "'" << std::endl;
-        bash << "flags='-std=c++2b " << (t == project::PROJECT_MODULE_TYPE_LIB || t == project::PROJECT_TYPE_LIB?"-fPIC'":"'") << std::endl;
-        bash << std::endl;
-        bash << "includes='-I headers " << (fast?"'":"-I ../include'") << std::endl;
-
-        if(t != project::PROJECT_MODULE_TYPE_LIB && t != project::PROJECT_TYPE_LIB) 
-            bash << "libs='" << (fast?"'":"-L ../lib'") << std::endl;
-
-        bash << std::endl;
-        bash << "#Clean:" << std::endl;
-        bash << "echo Cleaning $name" << std::endl;
-        bash << "rm -fr bin/*" << std::endl;
-        bash << "rm -f $name*" << std::endl;
-        bash << std::endl;
-        bash << "#Create bin:" << std::endl;
-        bash << "mkdir bin 2>/dev/null" << std::endl;
-        bash << std::endl;
-        bash << "#Compile sources" << std::endl;
-        bash << "for src in ./src/*" << std::endl;
-        bash << "do" << std::endl;
-        bash << "\techo Compiling $src" << std::endl;
-        bash << "\tg++ -c -o bin/$( echo $src | cut -d '/' -f 2).o $src $includes $flags" << std::endl;
-        bash << "done" << std::endl;
-        bash << std::endl;
-
-        bash << "#Link:" << std::endl;
-        switch(t){
-            case project::PROJECT_MODULE_TYPE_EXE:
-            case project::PROJECT_TYPE_EXE:
-                bash << "echo Linking $name" << std::endl;
-                bash << "g++ -o $name bin/*.o $libs $flags" << std::endl;
-                break;
-            case project::PROJECT_MODULE_TYPE_LIB:
-            case project::PROJECT_TYPE_LIB:
-                bash << "echo Linking $name.a" << std::endl;
-                bash << "ar cvr $name.a bin/*" << std::endl;
-                bash << std::endl;
-                bash << "echo Linking $name.so" << std::endl;
-                bash << "g++ -shared -o $name.so bin/*.o $flags" << std::endl;
-                break;
-        }
-
-        if(t == project::PROJECT_TYPE_LIB){
-            bash << std::endl;
-            bash << "#Compile test:" << std::endl;
-            bash << "echo Test of $name" << std::endl;
-            bash << "g++ -o test/test test/test.cpp $includes $flags $name.a" << std::endl;
-        }
-
-        bash.close();
+        build.close();
     }
 }
